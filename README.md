@@ -1,2 +1,3 @@
 # 3D_Fundamentals
-Repository for learning the fundamentals of 3d computer graphics using Dx11. Code based on Planetchili's framework.
+본 레포지토리는 개인 학습용으로 사용 중이며, 학습의 목적은 3D 컴퓨터 그래픽스의 기반이 되는 지식들을 코드와 함께 살펴보며 이해하는 것에 있습니다.  
+학습 기록은 Notes 폴더에 마크다운 형식으로 정리되어 있습니다.
