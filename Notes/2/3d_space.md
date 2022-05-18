@@ -74,6 +74,7 @@ public:
 화면 좌표를 NDC에 맞게 -1, 1로 interpolate하는 과정은 어렵지 않다.
 다음과 같다.
 ```c++
+// branch: Tut2
 // 3차원 좌표를 화면상의 x, y로 변환해주는 과정 (일단은 z좌표 무시)
 Vec3& Transform( Vec3& v ) const
 	{
@@ -83,6 +84,91 @@ Vec3& Transform( Vec3& v ) const
 	}
 ```
 여기서 2차원에서는 좌상단이 0,0이고 우측이 x+, 하단이 y+인 좌표계를 사용한다는 점에 주의해야한다. (그래서 y값에 -1을 먼저 곱해준다)  
+  
+  
+  
+3차원 좌표계를 만들 준비가 되었으니, 실제로 무언가를 그려보자.  
+일단 큐브 하나를 그려보자.  
+Cube라는 클래스를 정의하자. 총 12개의 모서리가 있으니 점 24개를 저장해도 되지만, 그래픽스 라이브러리와 유사하게 IndexArray를 사용해  
+겹치는 점을 없애줌으로써 최적화가 가능하다.
 
+```c++
+#pragma once
 
+#include "Vec3.h"
+#include <vector>
+#include "IndexedLineList.h"
 
+class Cube
+{
+public:
+	Cube( float size )
+	{
+		const float side = size / 2.0f;
+		vertices.emplace_back( -side,-side,-side );
+		vertices.emplace_back( side,-side,-side );
+		vertices.emplace_back( -side,side,-side );
+		vertices.emplace_back( side,side,-side );
+		vertices.emplace_back( -side,-side,side );
+		vertices.emplace_back( side,-side,side );
+		vertices.emplace_back( -side,side,side );
+		vertices.emplace_back( side,side,side );
+	}
+	IndexedLineList GetLines() const
+	{
+		return{ 
+			vertices,{
+			0,1,  1,3,  3,2,  2,0, // 첫번째 모서리가 0, 1번 정점을 이었다는 뜻
+			0,4,  1,5,  3,7,  2,6,
+			4,5,  5,7,  7,6,  6,4 }
+		};
+	}
+private:
+	std::vector<Vec3> vertices;
+};
+```
+
+```c++
+#pragma once
+
+#include <vector>
+#include "Vec3.h"
+
+struct IndexedLineList
+{
+	std::vector<Vec3> vertices;
+	std::vector<size_t> indices;
+};
+```
+이제 이걸 실제로 프레임워크를 사용해 화면 상에 그려보자.
+
+```c++
+void Game::ComposeFrame()
+{
+	auto lines = cube.GetLines();
+	for( auto& v : lines.vertices ) //IndexedLineList.vertices
+	{
+		v += { 0.0f,0.0f,1.0f }; 
+		// 현재로썬 z축을 무시중이므로 현재로썬 시각적으로는 차이가 없지만, 나중을 위해 일단 카메라를 정육면체 밖에서 뺀다.
+		
+		pst.Transform( v );
+	}
+	for( auto i = lines.indices.cbegin(),
+		end = lines.indices.cend();
+		i != end; std::advance( i,2 ) ) // std::advance를 사용하면 i가 1 늘어날 때 iterator를 2씩 이동한다.
+		// 각 선에 대한 정보는 2개의 정점으로 이루어져 있으므로 2개씩 뛰어넘어간다.
+	{
+		gfx.DrawLine( lines.vertices[*i],lines.vertices[*std::next( i )],Colors::White );
+	}
+}
+```
+* 참고: std::advance 자료: https://ence2.github.io/2020/11/stdadvance-%EC%98%88%EC%A0%9C/
+
+![image](https://user-images.githubusercontent.com/63915665/169018463-b513cf52-b8a3-4b43-abaf-94e7908fb337.png)
+
+정사각형도 아니고 직사각형 하나가 그려지는 걸 볼 수 있는데, 
+일단 3차원 도형이 아닌 이유는 우리가 아직 z축에 의한 원근을 고려하지 않고 있기 때문이고(orthographic projection),  
+정사각형이 아닌 직사각형이 그려진 이유는 우리는 현재 가로세로 모두 -1에서 1까지로 나누고 있지만  
+실제 화면 픽셀은 비율이 다르기 때문이다. (만약 창 크기를 1:1 비율로 설정하면 정사각형이 그려진다)  
+
+이 문제는 Transformation Matrix를 사용해서 해결이 가능하며, 이는 차후 다루겠다.
