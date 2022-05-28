@@ -65,6 +65,8 @@ Dx11의 rasterization rule은 ***top-left rule***을 사용한다.
     2-1) 삼각형의 윗쪽 변에 픽셀의 중앙이 걸쳐있고, 그 윗쪽 변이 horizontal(x축에 평행)하면 그린다
     2-2) 삼각형의 좌측 변에 픽셀의 중앙이 걸쳐있고, 그 좌측 변이 horizontal하지 않다면 그린다. (삼각형은 좌측 변을 하나 또는 두개 가질 수 있다.)  
   
+---
+  
 이를 코드로 어떻게 구현하는지를 살펴보자.  
 ```c++
 // Graphics.h
@@ -200,8 +202,198 @@ else // general triangle (그 외의 거의 대부분의 경우)
 알파 = 짧은 파랑색 길이/긴 파랑색 길이  
 이다.  
   
+삼각형의 닮음비는 x,y 모두 성립하므로 vi의 좌표는 다음과 같은 식으로 구할 수 있다.  
+vi = (1-알파)v0 + 알파v2  
+  
+식을 전개해서 정리하면 다음과 같다.  
+vi = v0 + (v2-v0)\*알파  
+이 식을 사용중인 것을 코드에서도 볼 수 있다.  
+  
+이제 vi.x와 v0.x를 비교함으로써 major-right, major-left를 판별할 수 있다.  ]
+![image](https://user-images.githubusercontent.com/63915665/170818432-4f654713-ad6a-4fd5-bd08-731d770fc47f.png)  
+  
+---
+  
+이번엔 DrawFlatTopTriangle, DrawFlatBottomTriangle 함수를 살펴보자.  
+여기서 top-left rule이 구현된다.  
+```c++
+void Graphics::DrawFlatTopTriangle( const Vec2& v0,const Vec2& v1,const Vec2& v2,Color c )
+{
+	// calulcate slopes in screen space
+	float m0 = (v2.x - v0.x) / (v2.y - v0.y);
+	float m1 = (v2.x - v1.x) / (v2.y - v1.y);
+	/* 여기서 중요한 포인트가 하나 있는데, 
+	자세히 보면 우리는 일반적인 기울기 공식 dy/dx 대신 dx/dy를 사용하고 있음을 알 수 있다. 
+	이는 m0, m1은 좌, 우변의 기울기를 나타내는 값인데 
+	만약 dy/dx꼴로 사용해버리게 되면 만약 변이 x축에 수직일 경우 값이 무한대가 되어버린다는 문제가 발생한다. 
+	문에 모든 가능한 삼각형 옆변의 기울기를 표현하기 위해 dx/dy를 대신 사용한다. 
+	(어차피 옆의 변은 x축에 평행할 수가 없기 때문에 dx/dy꼴에서는 무한대 값이 나올 수가 없다.)
+	*/
 
+	// calculate start and end scanlines (어느 좌표부터 어느 좌표까지 스캔할 지 범위를 잡는다)
+	const int yStart = (int)ceil( v0.y - 0.5f );
+	const int yEnd = (int)ceil( v2.y - 0.5f ); // the scanline AFTER the last line drawn
+	
+	// 스캔
+	for( int y = yStart; y < yEnd; y++ ) // 스캔 시에는 정수값만을 사용한다. (픽셀 좌표계가 정수 격자이므로)
+	{
+		// caluclate start and end points (x-coords)
+		// add 0.5 to y value because we're calculating based on pixel CENTERS
+		// 앞서 구한 기울기값을 이용해 x의 범위를 구한다.
+		const float px0 = m0 * (float( y ) + 0.5f - v0.y) + v0.x;
+		const float px1 = m1 * (float( y ) + 0.5f - v1.y) + v1.x;
 
+		// calculate start and end pixels
+		const int xStart = (int)ceil( px0 - 0.5f );
+		const int xEnd = (int)ceil( px1 - 0.5f ); // the pixel AFTER the last pixel drawn
 
+		for( int x = xStart; x < xEnd; x++ )
+		{
+			PutPixel( x,y,c );
+		}
+	}
+}
+
+void Graphics::DrawFlatBottomTriangle( const Vec2& v0,const Vec2& v1,const Vec2& v2,Color c )
+{
+	// calulcate slopes in screen space
+	float m0 = (v1.x - v0.x) / (v1.y - v0.y);
+	float m1 = (v2.x - v0.x) / (v2.y - v0.y);
+
+	// calculate start and end scanlines
+	const int yStart = (int)ceil( v0.y - 0.5f );
+	const int yEnd = (int)ceil( v2.y - 0.5f ); // the scanline AFTER the last line drawn
+
+	for( int y = yStart; y < yEnd; y++ )
+	{
+		// caluclate start and end points
+		// add 0.5 to y value because we're calculating based on pixel CENTERS
+		const float px0 = m0 * (float( y ) + 0.5f - v0.y) + v0.x;
+		const float px1 = m1 * (float( y ) + 0.5f - v0.y) + v0.x;
+
+		// calculate start and end pixels
+		const int xStart = (int)ceil( px0 - 0.5f );
+		const int xEnd = (int)ceil( px1 - 0.5f ); // the pixel AFTER the last pixel drawn
+
+		for( int x = xStart; x < xEnd; x++ )
+		{
+			PutPixel( x,y,c );
+		}
+	}
+}
+```
+  
+---
+  
+lines rasterization을 구현했으니, 실제로 이를 프레임워크 단으로 가져와 적용시켜보자.  
+일단 기존에 큐브를 선들의 집합으로 표현했지만 (IndexedLineList) 이제는 폴리곤을 사용할 수 있게 되었으니 폴리곤으로 표현해보자.  
+```c++
+//IndexedTraingleList.h
+#pragma once
+
+#include <vector>
+#include "Vec3.h"
+
+struct IndexedTriangleList
+{
+	std::vector<Vec3> vertices; //좌표점
+	std::vector<size_t> indices; // 각 폴리곤(삼각형)들의 인덱스들.
+};
+```
+  
+![image](https://user-images.githubusercontent.com/63915665/170818824-3e7eddae-070f-46c0-b768-dd6163010ae8.png)  
+```c++
+//Cube.h
+#pragma once
+
+#include "Vec3.h"
+#include <vector>
+#include "IndexedLineList.h"
+#include "IndexedTriangleList.h"
+
+class Cube
+{
+public:
+	Cube( float size )
+	{
+		const float side = size / 2.0f;
+		vertices.emplace_back( -side,-side,-side );
+		vertices.emplace_back( side,-side,-side );
+		vertices.emplace_back( -side,side,-side );
+		vertices.emplace_back( side,side,-side );
+		vertices.emplace_back( -side,-side,side );
+		vertices.emplace_back( side,-side,side );
+		vertices.emplace_back( -side,side,side );
+		vertices.emplace_back( side,side,side );
+	}
+	IndexedLineList GetLines() const
+	{
+		return{ 
+			vertices,{
+			0,1,  1,3,  3,2,  2,0,
+			0,4,  1,5,	3,7,  2,6,
+			4,5,  5,7,	7,6,  6,4 }
+		};
+	}
+	IndexedTriangleList GetTriangles() const
+	{
+		return{
+			vertices,{
+			0,2,1, 2,3,1,
+			1,3,5, 3,7,5,
+			2,6,3, 3,6,7,
+			4,5,7, 4,7,6,
+			0,4,2, 2,4,6,
+			0,1,4, 1,5,4 }
+		}; // 사진참고
+	}
+private:
+	std::vector<Vec3> vertices;
+};
+```
+
+```c++
+// Game.cpp
+... (생략)
+void Game::ComposeFrame()
+{
+	const Color colors[12] = {
+		Colors::White,
+		Colors::Blue,
+		Colors::Cyan,
+		Colors::Gray,
+		Colors::Green,
+		Colors::Magenta,
+		Colors::LightGray,
+		Colors::Red,
+		Colors::Yellow,
+		Colors::White,
+		Colors::Blue,
+		Colors::Cyan
+	}; // 현재로썬 큐브의 변을 그릴 방법이 없으므로 일단 각 폴리곤을 색상으로 구분함. 
+	auto triangles = cube.GetTriangles();
+	const Mat3 rot =
+		Mat3::RotationX( theta_x ) *
+		Mat3::RotationY( theta_y ) *
+		Mat3::RotationZ( theta_z );
+	for( auto& v : triangles.vertices )
+	{
+		v *= rot;
+		v += { 0.0f,0.0f,offset_z };
+		pst.Transform( v );
+	}
+	for( auto i = triangles.indices.cbegin(),
+		end = triangles.indices.cend();
+		i != end; std::advance( i,3 ) )
+	{
+		gfx.DrawTriangle( triangles.vertices[*i],triangles.vertices[*std::next( i )],triangles.vertices[*std::next( i,2 )],
+						  colors[std::distance( triangles.indices.cbegin(),i ) / 3] );
+	}
+}
+```
+
+이제 코드를 실행하면 다음과 같은 큐브가 그려진다.  
+![image](https://user-images.githubusercontent.com/63915665/170818979-8f8b6780-4ecd-401a-936c-fefdf4ed7ea1.png)  
+폴리곤 처리 및 래스터라이제이션이 잘 되었지만 우리가 생각했던 것과는 약간 다른 결과물이 나온 것을 알 수 있는데, 왜 이런 못브이 나오는지는 다음 시간에 다뤄보겠다.  
 
 
