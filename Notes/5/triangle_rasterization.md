@@ -29,6 +29,7 @@ Occlusion이 없이 지금처럼 wireframe rendering만 한다면 위 그림에�
 이를 해결하기 위해 우리는 삼각형을 두 개로 분할한다. (flat-bottom, flat-top traingle로 분할한다)  
 ![image](https://user-images.githubusercontent.com/63915665/170815829-efa7b403-90cc-4324-9bc7-9421a19b41b4.png)  
 이렇게 하는 것으로 이전에 발생했던 문제를 없앨 수 있다.  
+구체적으로 어떻게 나누는 지는 뒤에서 코드와 함께 살펴보겠다.  
   
   
   
@@ -86,25 +87,7 @@ DrawTriangle은 삼각형을 flat-top과 flat-bottom으로 쪼개 이를 색칠(
 
 class Graphics
 {
-public:
-	class Exception : public ChiliException
-	{
-	public:
-		Exception( HRESULT hr,const std::wstring& note,const wchar_t* file,unsigned int line );
-		std::wstring GetErrorName() const;
-		std::wstring GetErrorDescription() const;
-		virtual std::wstring GetFullMessage() const override;
-		virtual std::wstring GetExceptionType() const override;
-	private:
-		HRESULT hr;
-	};
-private:
-	// vertex format for the framebuffer fullscreen textured quad
-	struct FSQVertex
-	{
-		float x,y,z;		// position
-		float u,v;			// texcoords
-	};
+... (생략)
 public:
 	Graphics( class HWNDKey& key );
 	Graphics( const Graphics& ) = delete;
@@ -129,33 +112,94 @@ public:
 private:
 	void DrawFlatTopTriangle( const Vec2& v0,const Vec2& v1,const Vec2& v2,Color c );
 	void DrawFlatBottomTriangle( const Vec2& v0,const Vec2& v1,const Vec2& v2,Color c );
-private:
-	GDIPlusManager										gdipMan;
-	Microsoft::WRL::ComPtr<IDXGISwapChain>				pSwapChain;
-	Microsoft::WRL::ComPtr<ID3D11Device>				pDevice;
-	Microsoft::WRL::ComPtr<ID3D11DeviceContext>			pImmediateContext;
-	Microsoft::WRL::ComPtr<ID3D11RenderTargetView>		pRenderTargetView;
-	Microsoft::WRL::ComPtr<ID3D11Texture2D>				pSysBufferTexture;
-	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>	pSysBufferTextureView;
-	Microsoft::WRL::ComPtr<ID3D11PixelShader>			pPixelShader;
-	Microsoft::WRL::ComPtr<ID3D11VertexShader>			pVertexShader;
-	Microsoft::WRL::ComPtr<ID3D11Buffer>				pVertexBuffer;
-	Microsoft::WRL::ComPtr<ID3D11InputLayout>			pInputLayout;
-	Microsoft::WRL::ComPtr<ID3D11SamplerState>			pSamplerState;
-	D3D11_MAPPED_SUBRESOURCE							mappedSysBufferTexture;
-	Surface												sysBuffer;
-public:
-	static constexpr unsigned int ScreenWidth = 640u;
-	static constexpr unsigned int ScreenHeight = 640u;
+... (생략)
 };
 ```
 
-  
+```c++
+// Graphics.cpp
+void Graphics::DrawTriangle( const Vec2& v0,const Vec2& v1,const Vec2& v2,Color c )
+{
+	// 1. 인풋으로 주어지는 세 점 v0, v1, v2를 y축이 작은 순서대로(화면 윗쪽에 있는 순서대로) 정렬한다.
+	// using pointers so we can swap (for sorting purposes)
+	const Vec2* pv0 = &v0;
+	const Vec2* pv1 = &v1;
+	const Vec2* pv2 = &v2;
+
+	// sorting vertices by y
+	if( pv1->y < pv0->y ) std::swap( pv0,pv1 );
+	if( pv2->y < pv1->y ) std::swap( pv1,pv2 );
+	if( pv1->y < pv0->y ) std::swap( pv0,pv1 );
+
+	// 2. 이렇게 정렬한 세 점을 통해 삼각형이 어떻게 생겼는지 파악한다.
+	if( pv0->y == pv1->y ) // natural flat top (윗쪽 변이 x축과 평행)
+	{
+		// sorting top vertices by x
+		if( pv1->x < pv0->x ) std::swap( pv0,pv1 ); // x축이 작은 게 먼저 오게 정렬한다.
+		DrawFlatTopTriangle( *pv0,*pv1,*pv2,c );
+	}
+	else if( pv1->y == pv2->y ) // natural flat bottom (아랫쪽 변이 x축과 평행)
+	{
+		// sorting bottom vertices by x
+		if( pv2->x < pv1->x ) std::swap( pv1,pv2 ); // x축이 작은 게 먼저 오게 정렬한다.
+		DrawFlatBottomTriangle( *pv0,*pv1,*pv2,c );
+	}
+	else // general triangle (그 외의 거의 대부분의 경우)
+	{
+		// find splitting vertex
+		const float alphaSplit =
+			(pv1->y - pv0->y) /
+			(pv2->y - pv0->y);
+		const Vec2 vi = *pv0 + (*pv2 - *pv0) * alphaSplit;
+
+		if( pv1->x < vi.x ) // major right
+		{
+			DrawFlatBottomTriangle( *pv0,*pv1,vi,c );
+			DrawFlatTopTriangle( *pv1,vi,*pv2,c );
+		}
+		else // major left
+		{
+			DrawFlatBottomTriangle( *pv0,vi,*pv1,c );
+			DrawFlatTopTriangle( vi,*pv1,*pv2,c );
+		}
+	}
+}
+```
+보충설명 하자면,  
+```c++
+else // general triangle (그 외의 거의 대부분의 경우)
+	{
+		// find splitting vertex
+		const float alphaSplit =
+			(pv1->y - pv0->y) /
+			(pv2->y - pv0->y);
+		const Vec2 vi = *pv0 + (*pv2 - *pv0) * alphaSplit;
+
+		if( pv1->x < vi.x ) // major right
+		{
+			DrawFlatBottomTriangle( *pv0,*pv1,vi,c );
+			DrawFlatTopTriangle( *pv1,vi,*pv2,c );
+		}
+		else // major left
+		{
+			DrawFlatBottomTriangle( *pv0,vi,*pv1,c );
+			DrawFlatTopTriangle( vi,*pv1,*pv2,c );
+		}
+	}
+```  
+이 부분은 삼각형을 앞서 언급한, 삼각형을 두 개로 나누는 과정이다.    
 ![image](https://user-images.githubusercontent.com/63915665/170815875-21067785-67af-4531-a4fc-d1d131c17662.png)  
-이때 나눠지는 저 지점을 찾아야 하는데(그래야 스캔할 x범위를 찾을 수 있음), 이를 찾는 과정을 살펴보자.  
+더 자세히 말하면, 삼각형을 두개로 나눴을 때의 나눠지는 지점(코드에서는 vi)을 찾는 과정이기도 하다. (그래야 스캔할 x범위를 찾을 수 있음)  
   
-우선은 주어진 삼각형이 major-left인지 major-right인지를 확인해야 한다.  
+삼각형이 major-left인지 major-right인지를 확인하는 걸 볼 수 있다.  
 ![image](https://user-images.githubusercontent.com/63915665/170815943-2bdd567f-3c74-4be9-b56d-ab41f0a8615d.png)  
+
+이를 확인하기 위해 vi라는 값을 구하는데, vi를 구하기 위해서는 알파(코드에서는 alphaSplit)라는 값을 구해야 한다.  
+![image](https://user-images.githubusercontent.com/63915665/170817102-f09793cf-6d83-4135-88ba-be630cacc059.png)  
+이 알파는 v0, v1, v2의 y축 거리의 비를 이용해 구하는 값인데,  
+알파 = 짧은 파랑색 길이/긴 파랑색 길이  
+이다.  
+  
 
 
 
