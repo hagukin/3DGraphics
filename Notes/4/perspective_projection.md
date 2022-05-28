@@ -73,7 +73,7 @@ Vec3& Transform( Vec3& v ) const
 이 큐브의 일부분이 image plane의 뒷쪽으로 넘어가버리게 되어 상이 이상한 형태로 맺히게 된다.  
 ![image](https://user-images.githubusercontent.com/63915665/170813580-623f89ae-8c0f-4cdd-b1d7-1eea4fca8570.png)  
   
-때문에 큐브롤 image plane에서 더 멀리 떼어놓으면 이 문제를 해결 가능하다.
+때문에 큐브를 image plane에서 더 멀리 떼어놓으면 이 문제를 해결 가능하다.  
 ![image](https://user-images.githubusercontent.com/63915665/170813629-50a3bdf2-8c60-4271-a95a-f3dfd4d9993f.png)  
   
 코드로 보면 다음과 같다.  
