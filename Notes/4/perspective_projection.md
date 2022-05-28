@@ -1,0 +1,85 @@
+현재 우리는 3차원 오브젝트를 orthographic한 방식으로 projection하고 있다.  
+즉 z축에 의한 원근을 무시한 채 그리고 있다.  
+  
+z축이 영향을 주게 만들어보자. (Perspective projection)
+
+perspective를 구현해보기 전에 우리의 시각이 현실에서 어떻게 작동하는지를 이해해보자.  
+우리는 왜 멀리 있는 물체를 더 "작다"고 인식할까?  
+pinhole camera를 사용해 직관적으로 이해할 수 있다.
+![image](https://user-images.githubusercontent.com/63915665/170812503-e6c264d4-d119-4111-99be-1ef5f10ea6f3.png)  
+  
+만약 pinhole이 없이 그냥 물체로부터 바로 센서로 빛이 들어오게 하면 어떨까?
+![image](https://user-images.githubusercontent.com/63915665/170812557-0f489ebd-a07d-41d7-b7be-75ad019d1c03.png)  
+물체에서 반사된 여러 광선들이 전부 다 센서로 들어오게 되므로 센서 전체에 골고루 빛이 퍼져 상이 뿌옇게 보일 것이다. 
+pinhole은 이 중 특정 광선들만을 통과시킴으로써 상을 뚜렷하게 만들어준다.  
+
+![image](https://user-images.githubusercontent.com/63915665/170812682-b03ea68f-a838-462a-8611-db1d63833f35.png)  
+여기서 또 한가지 눈여겨 볼 점은 우측에 있는 물체의 상이 센서의 좌측에 맺힌다는 것이다.  
+컴퓨터그래픽스에서 이를 해결하는 한가지 방법은 센서(image plane)를 초점(focal point) 앞으로 일정 거리만큼 당겨서 상이 물체의 위치와 같은 방향에 맺히게 하는 것이다.  
+이때 센서가 초점에서 떨어진 거리가 그 이전과 동일해야 상의 크기가 같다.  (물론 이는 현실의 물리세계에서는 불가능한 방법이긴 하다)
+  
+![image](https://user-images.githubusercontent.com/63915665/170812821-c3ae847d-b0ed-4a8e-968b-752450ec747e.png)  
+이를 계산해보면 아래와 같다.  
+초점, 센서, 그리고 물체의 위치가 주어졌을 때, 삼각형의 닮음을 이용해 센서에 맺히는 상의 크기를 구할 수 있음을 볼 수 있다.  
+  
+![image](https://user-images.githubusercontent.com/63915665/170812913-21d7b199-55d4-42cf-8a5d-b0317b598552.png)  
+x' = x/z라는 식이 도출되는 것을 볼 수 있다.  
+x'은 상의 윗쪽 부분의 x좌표이고(아랫쪽부분은 0으로 고정이므로) x,z는 각각 물체의 x,z좌표이다.  
+(물론 이 식은 focal point가 0,0이고, 센서가 0,1 위치에 있다고 가정했을 때의 식이다.)
+  
+이때 만약 물체가 focal plane(초점이 있는 평면)에 가까워지면 가까워질수록(z->0) 상의 x'이 무한대로 커지는 것을 볼 수 있다.  
+focal plane을 넘어가면 상이 뒤집혀버리는 것을 볼 수 있다.   
+때문에 물체가 일정 거리를 넘지 못하게 clipping 해주는 과정이 필요한데, 이는 나중에 다시 다뤄보도록 하겠다.  
+  
+![image](https://user-images.githubusercontent.com/63915665/170813218-34a045c1-6acc-472c-8bdc-a35704dc437e.png)  
+또 한가지 유의할 점은, 기존 orthographic projection에서는 x가 우리의 시야 범위 내 (-1<=x<=1)에 있으면 모든 물체를 다 볼 수 있었지만,  
+이제는 -1 <= x/z <= 1 을 만족해야만 볼 수 있다는 점이다.
+  
+지금까지 2->1차원 projection을 다뤘는데, 3->2차원 projection도 거의 동일하다.  
+x' = x/z  
+y' = y/z  
+를 해주면 된다.  
+  
+코드와 함께 살펴보자.  
+```c++
+// 기존
+// PubeScreenTransformer.h
+Vec3& Transform( Vec3& v ) const
+{
+  v.x = (v.x + 1.0f) * xFactor;
+  v.y = (-v.y + 1.0f) * yFactor;
+  return v;
+}
+```
+(참고:  
+xFactor = float( Graphics::ScreenWidth ) / 2.0f,  
+yFactor = float( Graphics::ScreenHeight ) / 2.0f  
+)  
+```c++
+// 수정
+// PubeScreenTransformer.h
+Vec3& Transform( Vec3& v ) const
+{
+  const float zInv = 1.0f / v.z;
+  v.x = (v.x * zInv + 1.0f) * xFactor;
+  v.y = (-v.y * zInv + 1.0f) * yFactor;
+  return v;
+}
+```
+바뀐 건 screen transformation을 하기 전에 x및 y좌표에 z를 나눠주는(* zInv)것이다.  
+하지만 이상태로 코드를 실행하면 에러가 발생하는데,  
+이유는 큐브의 위치에서 찾을 수 있다. 우리는 큐브를 0,0,0위치에 1,1,1길이로 만든 후 이를 0,0,1만큼 이동했는데,  
+우리가 사용하고 있는 식 (x'=x/z, y'=y/z)은 focal point가 0,0,0이고 센서(image plane)가 (0,0,1)위치에 있다고 가정하고 있기 때문에  
+이 큐브의 일부분이 image plane의 뒷쪽으로 넘어가버리게 되어 상이 이상한 형태로 맺히게 된다.  
+![image](https://user-images.githubusercontent.com/63915665/170813580-623f89ae-8c0f-4cdd-b1d7-1eea4fca8570.png)  
+  
+때문에 큐브롤 image plane에서 더 멀리 떼어놓으면 이 문제를 해결 가능하다.
+![image](https://user-images.githubusercontent.com/63915665/170813629-50a3bdf2-8c60-4271-a95a-f3dfd4d9993f.png)  
+  
+코드로 보면 다음과 같다.  
+![image](https://user-images.githubusercontent.com/63915665/170813677-ced23d58-ee89-4ab9-a3de-1ff293cd6457.png)  
+(단순히 큐브의 원점에서의 z축 거리를 더 멀게 늘려놓았다)
+물론 이는 근본적인 해결책이 아니며, 나중에 clipping을 사용해 애초에 이런 현상이 발생하지 않도록 방지해볼 것이다.  
+  
+![image](https://user-images.githubusercontent.com/63915665/170813709-17260254-e215-4d0d-8275-f697a8e11dbc.png)  
+이제 perspective projection이 정상동작하는 것을 볼 수 있다.  
