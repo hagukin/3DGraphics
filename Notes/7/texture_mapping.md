@@ -232,7 +232,7 @@ A. 좌변과 우변을 각각 iterate하면서 scanline의 좌측점과 우측�
 	// init tex width/height and clamp values
 	const float tex_width = float( tex.GetWidth() );
 	const float tex_height = float( tex.GetHeight() );
-	const float tex_clamp_x = tex_width - 1.0f;
+	const float tex_clamp_x = tex_width - 1.0f; // 마지막 픽셀의 위치
 	const float tex_clamp_y = tex_height - 1.0f;
 
 	for( int y = yStart; y < yEnd; y++,
@@ -241,11 +241,11 @@ A. 좌변과 우변을 각각 iterate하면서 scanline의 좌측점과 우측�
      // 폴리곤을 iterate하면서 동시에 텍스쳐도 iterate해야 하기 때문이다.
      // 이는 텍스쳐의 시작지점인 tcEdgeL/R에 tcEdgeStepL/R을 더해주는 것으로 이뤄진다. (사진 4)
 	{
-  /*
-  B. 매 루프마다 이번엔 이렇게 잡은 좌측점과 우측점 사이를 iterate해준다. (scanline 위의 점들을 iterate)
-     전체적으로 A 과정과 유사한 것을 볼 수 있는데, 이는 실제로 원리가 같기 때문이다.
-     (폴리곤과 텍스쳐에서 동시에 어떤 두 점 사이를 interpolate하기 위해 폴리곤에서의 거리를 텍스쳐 상에서의 거리로 변환시켜주고 픽셀들을 iterate)
-  */
+	  /*
+	  B. 매 루프마다 이번엔 이렇게 잡은 좌측점과 우측점 사이를 iterate해준다. (scanline 위의 점들을 iterate)
+	     전체적으로 A 과정과 유사한 것을 볼 수 있는데, 이는 실제로 원리가 같기 때문이다.
+	     (폴리곤과 텍스쳐에서 동시에 어떤 두 점 사이를 interpolate하기 위해 폴리곤에서의 거리를 텍스쳐 상에서의 거리로 변환시켜주고 픽셀들을 iterate)
+	  */
 		// caluclate start and end points (x-coords)
 		// add 0.5 to y value because we're calculating based on pixel CENTERS
 		const float px0 = m0 * (float( y ) + 0.5f - v0.pos.y) + v0.pos.x;
@@ -268,14 +268,309 @@ A. 좌변과 우변을 각각 iterate하면서 scanline의 좌측점과 우측�
 				int( std::min( tc.y * tex_height,tex_clamp_y ) ) ) );
 			// need std::min b/c tc.x/y == 1.0, we'll read off edge of tex
 			// and with fp err, tc.x/y can be > 1.0 (by a tiny amount)
+			// 왜 tc.x에 tex_width를 곱하는가?
+			// A: Dx11의 Texel coordinate system은 텍스쳐의 uv 좌표를 (0,0)~(1,1)의 실수로 나타낸다. 
+			// 때문에 실제 픽셀 좌표를 구하려면 길이를 곱해줘야 한다.
 		}
 	}
 }
 ```
+  
+---
+  
+![image](https://user-images.githubusercontent.com/63915665/173070829-9486891c-baeb-475f-a4ae-b67f1fc35f3e.png)  
+코드를 실행해보면 텍스쳐가 큐브 폴리곤 위에 입혀진 모습을 볼 수 있다.  
 
-TODO 20:11
+![image](https://user-images.githubusercontent.com/63915665/173071062-897bbff8-8c7d-413c-9140-a17fbc1b466a.png)  
+그런데 큐브의 윗쪽 면과 아랫쪽 면은 텍스쳐가 이상하게 입혀진 것을 볼 수 있는데, 이는 우리가 큐브를 나타내는 방식과 관련이 있다.  
+우리는 큐브를 정점(vertex)들로 표현할 때 겹치는 점들을 indexArray를 사용해 최적화했는데, 때문에 폴리곤의 어떤 점이 텍스쳐의 어떤 지점과 맵핑되었을 경우, 이는 도중에 수정되지 않는다.  
+(우리가 만든 TexVertex 오브젝트를 생각해보면 pos(폴리곤 vertex)와 tc(텍스쳐 coordinates)가 하나의 오브젝트로 묶여있다는 걸 알 수 있다. 또 현재 코드에서는 TexVertex의 pos와 tc가 초기화 된 이후 변경하지 않는다.)  
+
+![image](https://user-images.githubusercontent.com/63915665/173071933-1dd18889-206b-4ae1-997a-ab7d53eabd1d.png)  
+이 사진을 참고하면, 큐브의 앞쪽 빨간점과 노란점이 우측 텍스쳐를 보면 텍스쳐의 우상단과 우하단에 맵핑되어있는 것을 알 수 있다. 때문에 큐브의 전면 좌측면에는 텍스쳐가 정상적으로 그려진다.  
+
+![image](https://user-images.githubusercontent.com/63915665/173072445-8de2b79f-b29b-475d-81b8-d5830d56ee80.png)  
+하지만 그 옆의 면, 즉 전면 우측면의 경우 빨간점과 노란점이 면의 좌측에 위치하고 있는데, 앞서 말했듯이 이 점들은 이미 맵핑되어있고, 맵핑된 걸 도중에 바꾸지 않고 있기 때문에 텍스쳐의 우측이 폴리곤의 좌측에 맵핑되게 되어 텍스쳐가 좌우반전된 상태로 그려지게 된다.  
+(참고: 여기서 각 색깔별로 점이 두 개씩 있는데 이건 그냥 텍스쳐 맵핑을 나타내기 편하라고 그렇게 한 것이며 실제로는 8개의 개별적인 정점들이다.)  
+  
+![image](https://user-images.githubusercontent.com/63915665/173072710-61c6417a-2488-4f03-82a7-6be5d7a5a88b.png)  
+모델의 위아래면에 텍스쳐가 이상하게 입혀진 것도 같은 맥락에서 이해가 가능하다.  
+윗면과 아랫면의 폴리곤을 구성하는 정점들은 이미 맵핑이 완료된 상태인데, 그림을 살펴보면 윗면은 텍스쳐의 맨 윗줄(빨강파랑점)만을 렌더링 중이라는 것을 알 수 있다. (아랫면은 맨아랫줄)  
+
+이 문제를 해결하는 것은 잠시 미뤄두고, 코드를 조금 더 개선해보자. (커밋 7943bca8fd8460a9bf959cb7ad3bc80ab6178b01)  
+  
+우리는 현재 코드에서 텍스쳐의 uv좌표와 폴리곤의 좌표 모두를 동시에 iterate하고 있는데, 사실 둘 다 점 세개를 iterate하는 것이기 때문에 원리가 같다. (점 세개를 iterate하는 과정은 앞서 설명했다)  
+따라서 코드를 간소화하는 것이 가능하다.  
+
+TexVertex간의 연산을 지원하도록 연산자를 추가한다.  
+```c++
+#pragma once
+
+#include "Vec2.h"
+#include "Vec3.h"
+
+class TexVertex
+{
+public:
+	TexVertex( const Vec3& pos,const Vec2& tc )
+		:
+		pos( pos ),
+		tc( tc )
+	{}
+	TexVertex InterpolateTo( const TexVertex& dest,float alpha ) const
+	{
+		return{
+			pos.InterpolateTo( dest.pos,alpha ),
+			tc.InterpolateTo( dest.tc,alpha )
+		};
+	}
+	TexVertex& operator+=( const TexVertex& rhs )
+	{
+		pos += rhs.pos;
+		tc += rhs.tc;
+		return *this;
+	}
+	TexVertex operator+( const TexVertex& rhs ) const
+	{
+		return TexVertex( *this ) += rhs;
+	}
+	TexVertex& operator-=( const TexVertex& rhs )
+	{
+		pos -= rhs.pos;
+		tc -= rhs.tc;
+		return *this;
+	}
+	TexVertex operator-( const TexVertex& rhs ) const
+	{
+		return TexVertex( *this ) -= rhs;
+	}
+	TexVertex& operator*=( float rhs )
+	{
+		pos *= rhs;
+		tc *= rhs;
+		return *this;
+	}
+	TexVertex operator*( float rhs ) const
+	{
+		return TexVertex( *this ) *= rhs;
+	}
+	TexVertex& operator/=( float rhs )
+	{
+		pos /= rhs;
+		tc /= rhs;
+		return *this;
+	}
+	TexVertex operator/( float rhs ) const
+	{
+		return TexVertex( *this ) /= rhs;
+	}
+public:
+	Vec3 pos;
+	Vec2 tc;
+};
+```
+  
+```c++
+// Graphics.cpp
+void Graphics::DrawFlatTopTriangleTex( const TexVertex& v0,const TexVertex& v1,const TexVertex& v2,const Surface& tex )
+{
+	// calulcate dVertex / dy
+	const float delta_y = v2.pos.y - v0.pos.y;
+	const TexVertex dv0 = (v2 - v0) / delta_y;
+	const TexVertex dv1 = (v2 - v1) / delta_y;
+
+	// create edge interpolants
+	TexVertex itEdge0 = v0;
+	TexVertex itEdge1 = v1;
+
+	// calculate start and end scanlines
+	const int yStart = (int)ceil( v0.pos.y - 0.5f );
+	const int yEnd = (int)ceil( v2.pos.y - 0.5f ); // the scanline AFTER the last line drawn
+	
+	// do interpolant prestep
+	itEdge0 += dv0 * (float( yStart ) + 0.5f - v1.pos.y);
+	itEdge1 += dv1 * (float( yStart ) + 0.5f - v1.pos.y);
+
+	// init tex width/height and clamp values
+	const float tex_width = float( tex.GetWidth() );
+	const float tex_height = float( tex.GetHeight() );
+	const float tex_clamp_x = tex_width - 1.0f;
+	const float tex_clamp_y = tex_height - 1.0f;
+
+	for( int y = yStart; y < yEnd; y++,itEdge0 += dv0,itEdge1 += dv1 )
+	{
+		// calculate start and end pixels
+		const int xStart = (int)ceil( itEdge0.pos.x - 0.5f );
+		const int xEnd = (int)ceil( itEdge1.pos.x - 0.5f ); // the pixel AFTER the last pixel drawn
+		
+		// calculate scanline dTexCoord / dx
+		// 폴리곤, 텍스쳐 거리 비율 계산 (기울기) 
+		const Vec2 dtcLine = (itEdge1.tc - itEdge0.tc) / (itEdge1.pos.x - itEdge0.pos.x);
+
+		// create scanline tex coord interpolant and prestep
+		// prestep을 해준다. (기울기를 곱하는 것에 유의)
+		Vec2 itcLine = itEdge0.tc + dtcLine * (float( xStart ) + 0.5f - itEdge0.pos.x);
+
+		for( int x = xStart; x < xEnd; x++,itcLine += dtcLine )
+		{
+			PutPixel( x,y,tex.GetPixel( 
+				int( std::min( itcLine.x * tex_width,tex_clamp_x ) ),
+				int( std::min( itcLine.y * tex_height,tex_clamp_y ) ) ) );
+			// need std::min b/c tc.x/y == 1.0, we'll read off edge of tex
+			// and with fp err, tc.x/y can be > 1.0 (by a tiny amount)
+		}
+	}
+}
+
+// DrawFlatBottomTriangleTex도 같은 원리로 해준다.
+```
+  
+이를 한 단계 더 개선해서, DrawFlatTopTriangleTex와 DrawFlatBottomTriangleTex의 겹치는 부분을 함수로 빼서 더 길이를 줄일 수 있다.  
+```c++
+void Graphics::DrawFlatTopTriangleTex( const TexVertex& v0,const TexVertex& v1,const TexVertex& v2,const Surface& tex )
+{
+	// calulcate dVertex / dy
+	const float delta_y = v2.pos.y - v0.pos.y;
+	const TexVertex dv0 = (v2 - v0) / delta_y;
+	const TexVertex dv1 = (v2 - v1) / delta_y;
+
+	// create right edge interpolant
+	TexVertex itEdge1 = v1;
+
+	// call the flat triangle render routine
+	DrawFlatTriangleTex( v0,v1,v2,tex,dv0,dv1,itEdge1 );
+}
+
+void Graphics::DrawFlatBottomTriangleTex( const TexVertex& v0,const TexVertex& v1,const TexVertex& v2,const Surface& tex )
+{
+	// calulcate dVertex / dy
+	const float delta_y = v2.pos.y - v0.pos.y;
+	const TexVertex dv0 = (v1 - v0) / delta_y;
+	const TexVertex dv1 = (v2 - v0) / delta_y;
+
+	// create right edge interpolant
+	TexVertex itEdge1 = v0;
+
+	// call the flat triangle render routine
+	DrawFlatTriangleTex( v0,v1,v2,tex,dv0,dv1,itEdge1 );
+}
+
+void Graphics::DrawFlatTriangleTex( const TexVertex& v0,const TexVertex& v1,const TexVertex& v2,const Surface& tex,
+									const TexVertex& dv0,const TexVertex& dv1,TexVertex& itEdge1 )
+{
+	// create edge interpolant for left edge (always v0)
+	TexVertex itEdge0 = v0;
+
+	// calculate start and end scanlines
+	const int yStart = (int)ceil( v0.pos.y - 0.5f );
+	const int yEnd = (int)ceil( v2.pos.y - 0.5f ); // the scanline AFTER the last line drawn
+	
+	// do interpolant prestep
+	itEdge0 += dv0 * (float( yStart ) + 0.5f - v0.pos.y);
+	itEdge1 += dv1 * (float( yStart ) + 0.5f - v0.pos.y);
+
+	// init tex width/height and clamp values
+	const float tex_width = float( tex.GetWidth() );
+	const float tex_height = float( tex.GetHeight() );
+	const float tex_clamp_x = tex_width - 1.0f;
+	const float tex_clamp_y = tex_height - 1.0f;
+
+	for( int y = yStart; y < yEnd; y++,itEdge0 += dv0,itEdge1 += dv1 )
+	{
+		// calculate start and end pixels
+		const int xStart = (int)ceil( itEdge0.pos.x - 0.5f );
+		const int xEnd = (int)ceil( itEdge1.pos.x - 0.5f ); // the pixel AFTER the last pixel drawn
+		
+		// calculate scanline dTexCoord / dx
+		const Vec2 dtcLine = (itEdge1.tc - itEdge0.tc) / (itEdge1.pos.x - itEdge0.pos.x);
+
+		// create scanline tex coord interpolant and prestep
+		Vec2 itcLine = itEdge0.tc + dtcLine * (float( xStart ) + 0.5f - itEdge0.pos.x);
+
+		for( int x = xStart; x < xEnd; x++,itcLine += dtcLine )
+		{
+			PutPixel( x,y,tex.GetPixel( 
+				int( std::min( itcLine.x * tex_width,tex_clamp_x ) ),
+				int( std::min( itcLine.y * tex_height,tex_clamp_y ) ) ) );
+			// need std::min b/c tc.x/y == 1.0, we'll read off edge of tex
+			// and with fp err, tc.x/y can be > 1.0 (by a tiny amount)
+		}
+	}
+}
+```
+  
+---
+  
+![image](https://user-images.githubusercontent.com/63915665/173079041-09bf1b72-3e04-45aa-947d-478929487d42.png)  
+![image](https://user-images.githubusercontent.com/63915665/173079585-3cecd75f-5f9c-485e-b9d1-981d4ab52319.png)  
+만약 Cube오브젝트를 처음 생성할 때 texdim값으로 2.0f를 줄 경우 계산 방식에 따라 위 사진과 같은 형태로 나온다.  
+texdim의 역할은 텍스쳐 좌표를 (0,0)부터 (texdim,texdim)까지 읽는지를 정해주는 용도이다.  
+```c++
+class Cube
+{
+public:
+	Cube( float size,float texdim = 1.0f )
+	{
+		const float side = size / 2.0f;
+		vertices.emplace_back( -side,-side,-side ); // 0
+		tc.emplace_back( 0.0f,texdim );
+		vertices.emplace_back( side,-side,-side ); // 1
+		tc.emplace_back( texdim,texdim );
+		vertices.emplace_back( -side,side,-side ); // 2
+		tc.emplace_back( 0.0f,0.0f );
+		vertices.emplace_back( side,side,-side ); // 3
+		tc.emplace_back( texdim,0.0f );
+		vertices.emplace_back( -side,-side,side ); // 4
+		tc.emplace_back( texdim,texdim );
+		vertices.emplace_back( side,-side,side ); // 5
+		tc.emplace_back( 0.0f,texdim );
+		vertices.emplace_back( -side,side,side ); // 6
+		tc.emplace_back( texdim,0.0f );
+		vertices.emplace_back( side,side,side ); // 7
+		tc.emplace_back( 0.0f,0.0f );
+	}
+	// (생략)
+	IndexedTriangleList<TexVertex> GetTrianglesTex() const
+	{
+		std::vector<TexVertex> tverts;
+		tverts.reserve( vertices.size() );
+		for( size_t i = 0; i < vertices.size(); i++ )
+		{
+			tverts.emplace_back( vertices[i],tc[i] );
+		}
+		return {
+			std::move( tverts ),{
+			0,2,1, 2,3,1,
+			1,3,5, 3,7,5,
+			2,6,3, 3,6,7,
+			4,5,7, 4,7,6,
+			0,4,2, 2,4,6,
+			0,1,4, 1,5,4 }
+		};
+	}
+	// (생략)
+```
+아무튼 이렇게 texdim값을 변경해주었을 경우 텍스쳐 좌표를 어떤 식으로 입히냐에 따라서 다음과 같은 형태로 나뉜다.  
+첫번째 사진은 지금 코드 그대로 텍스쳐 좌표가 1을 넘어갔을 경우 그냥 1로 clamp 했을 때의 모습이고, 두번째 사진은 1을 넘어갔을 경우 0으로 다시 돌아가서 이어가는 경우이다.  
+두 렌더링 방식 모두 쓸 일이 있을 수 있기 때문에 이를 별도의 함수로 분리한다.  
 
 
+```c++
+//Graphics::DrawFlatTriangleTex
+// ...
+PutPixel( x,y,tex.GetPixel( 
+	int( std::min( itcLine.x * tex_width,tex_clamp_x ) ),
+	int( std::min( itcLine.y * tex_height,tex_clamp_y ) ) ) );
+```
 
-
+```c++
+//Graphics::DrawFlatTriangleTexWrap
+PutPixel( x,y,tex.GetPixel(
+	int( std::fmod( itcLine.x * tex_width,tex_clamp_x ) ),
+	int( std::fmod( itcLine.y * tex_height,tex_clamp_y ) ) ) );
+```
+두 함수의 차이점은 clamp하는지 fmod하는지 밖에 없다. (참고: std::fmod는 그냥 실수형 모듈러 연산이다. -0.3을 0.7로, 1.5를 0.5로 바꿔준다.)  
+  
+---
+  
 
