@@ -573,4 +573,336 @@ PutPixel( x,y,tex.GetPixel(
   
 ---
   
+위에서 언급한 텍스쳐가 뒤집히는 현상을 해결하는 방법을 알아보자.  
+문제의 원인은 폴리곤의 정점이 텍스쳐와 맵핑된 채 다른 폴리곤에도 쓰이는 것이었는데, 이를 해결하는 가장 쉬운 방법은 정점의 갯수를 늘리는 것이다. 즉 모든 면을 각각 4개의 정점을 가진 사각형으로 나타내면 큐브 하나는 6x4=24개의 정점으로 나타낼 수 있다.  
+
+![image](https://user-images.githubusercontent.com/63915665/173084124-113582a8-7b28-4015-bf9f-0952275d4216.png)  
+![image](https://user-images.githubusercontent.com/63915665/173084731-35daba2f-69aa-4d99-919c-05913e0bdad5.png)  
+
+사실 14개의 정점만으로도 잘 맵핑한다면 모든 면에 텍스쳐를 맵핑하는 것이 가능하다. 자세한 과정은 생략한다. (코드1)  
+
+여기서 더 나아가 방금 다룬 텍스쳐 wrapping을 이용하는 것으로도 모든 면에 텍스쳐를 입힐 수 있다. 위 전개도에서 초록색 숫자를 정점의 번호라고 했을 때 0번, 1번에 텍스쳐 (0,0), (0,1)을 맵핑하고 8,9번에 (0,4), (4,4)를 맵핑한 후 wrapping 방식을 사용하면 가운데 4개면은 모두 같은 방향을 바라보게 텍스쳐를 입힐 수 있다.  
+위 아래 면도 만약 10번에 (-1,1), 12번에 (2,1)을 입힌다면 모든 면에 대해 같은 방향으로 텍스쳐를 입힐 수 있다.  
+
+이 방식으로도 14개의 정점으로 텍스쳐를 입힐 수 있다. (코드2)  
+
+<코드1>  
+```c++
+//CubeFolded.h
+#pragma once
+
+#include "Vec3.h"
+#include <vector>
+#include "IndexedLineList.h"
+#include "IndexedTriangleList.h"
+#include "TexVertex.h"
+
+class CubeFolded
+{
+public:
+	CubeFolded( float size )
+	{
+		const float side = size / 2.0f;
+		vertices.emplace_back( -side,-side,-side ); // 0
+		tc.emplace_back( 1.0f,0.0f );
+		vertices.emplace_back( side,-side,-side ); // 1
+		tc.emplace_back( 0.0f,0.0f );
+		vertices.emplace_back( -side,side,-side ); // 2
+		tc.emplace_back( 1.0f,1.0f );
+		vertices.emplace_back( side,side,-side ); // 3
+		tc.emplace_back( 0.0f,1.0f );
+		vertices.emplace_back( -side,-side,side ); // 4
+		tc.emplace_back( 1.0f,1.0f );
+		vertices.emplace_back( side,-side,side ); // 5
+		tc.emplace_back( 0.0f,1.0f );
+		vertices.emplace_back( -side,side,side ); // 6
+		tc.emplace_back( 1.0f,0.0f );
+		vertices.emplace_back( side,side,side ); // 7
+		tc.emplace_back( 0.0f,0.0f );
+		vertices.emplace_back( -side,-side,-side ); // 8
+		tc.emplace_back( 1.0f,0.0f );
+		vertices.emplace_back( side,-side,-side ); // 9
+		tc.emplace_back( 0.0f,0.0f );
+		vertices.emplace_back( -side,-side,-side ); // 10
+		tc.emplace_back( 0.0f,1.0f );
+		vertices.emplace_back( -side,-side,side ); // 11
+		tc.emplace_back( 0.0f,0.0f );
+		vertices.emplace_back( side,-side,-side ); // 12
+		tc.emplace_back( 1.0f,1.0f );
+		vertices.emplace_back( side,-side,side ); // 13
+		tc.emplace_back( 1.0f,0.0f );
+	}
+	IndexedLineList GetLines() const
+	{
+		throw std::runtime_error( "Incomplete function CubeFolded::GetLines!" );
+		//return{
+		//	vertices,{
+		//		0,1,  1,3,  3,2,  2,0,
+		//		0,4,  1,5,	3,7,  2,6,
+		//		4,5,  5,7,	7,6,  6,4 }
+		//};
+	}
+	IndexedTriangleList<Vec3> GetTriangles() const
+	{
+		return{
+			vertices,{
+				0,2,1, 2,3,1,
+				4,8,5, 5,8,9,
+				2,6,3, 3,6,7,
+				4,5,7, 4,7,6,
+				2,10,11, 2,11,6,
+				12,3,7, 12,7,13
+			}
+		};
+	}
+	IndexedTriangleList<TexVertex> GetTrianglesTex() const
+	{
+		std::vector<TexVertex> tverts;
+		tverts.reserve( vertices.size() );
+		for( size_t i = 0; i < vertices.size(); i++ )
+		{
+			tverts.emplace_back( vertices[i],tc[i] );
+		}
+		return{
+			std::move( tverts ),{
+				0,2,1, 2,3,1,
+				4,8,5, 5,8,9,
+				2,6,3, 3,6,7,
+				4,5,7, 4,7,6,
+				2,10,11, 2,11,6,
+				12,3,7, 12,7,13
+			}
+		};
+	}
+private:
+	std::vector<Vec3> vertices;
+	std::vector<Vec2> tc;
+};
+```
+  
+<코드2>  
+```
+//CubeFoldedWrap.
+#pragma once
+
+#include "Vec3.h"
+#include <vector>
+#include "IndexedLineList.h"
+#include "IndexedTriangleList.h"
+#include "TexVertex.h"
+
+class CubeFoldedWrap
+{
+public:
+	CubeFoldedWrap( float size )
+	{
+		const float side = size / 2.0f;
+		vertices.emplace_back( -side,-side,-side ); // 0
+		tc.emplace_back( 1.0f,0.0f );
+		vertices.emplace_back( side,-side,-side ); // 1
+		tc.emplace_back( 0.0f,0.0f );
+		vertices.emplace_back( -side,side,-side ); // 2
+		tc.emplace_back( 1.0f,1.0f );
+		vertices.emplace_back( side,side,-side ); // 3
+		tc.emplace_back( 0.0f,1.0f );
+		vertices.emplace_back( -side,-side,side ); // 4
+		tc.emplace_back( 1.0f,3.0f );
+		vertices.emplace_back( side,-side,side ); // 5
+		tc.emplace_back( 0.0f,3.0f );
+		vertices.emplace_back( -side,side,side ); // 6
+		tc.emplace_back( 1.0f,2.0f );
+		vertices.emplace_back( side,side,side ); // 7
+		tc.emplace_back( 0.0f,2.0f );
+		vertices.emplace_back( -side,-side,-side ); // 8
+		tc.emplace_back( 1.0f,4.0f );
+		vertices.emplace_back( side,-side,-side ); // 9
+		tc.emplace_back( 0.0f,4.0f );
+		vertices.emplace_back( -side,-side,-side ); // 10
+		tc.emplace_back( 2.0f,1.0f );
+		vertices.emplace_back( -side,-side,side ); // 11
+		tc.emplace_back( 2.0f,2.0f );
+		vertices.emplace_back( side,-side,-side ); // 12
+		tc.emplace_back( -1.0f,1.0f );
+		vertices.emplace_back( side,-side,side ); // 13
+		tc.emplace_back( -1.0f,2.0f );
+	}
+	IndexedLineList GetLines() const
+	{
+		throw std::runtime_error( "Incomplete function CubeFolded::GetLines!" );
+		//return{
+		//	vertices,{
+		//		0,1,  1,3,  3,2,  2,0,
+		//		0,4,  1,5,	3,7,  2,6,
+		//		4,5,  5,7,	7,6,  6,4 }
+		//};
+	}
+	IndexedTriangleList<Vec3> GetTriangles() const
+	{
+		return{
+			vertices,{
+				0,2,1, 2,3,1,
+				4,8,5, 5,8,9,
+				2,6,3, 3,6,7,
+				4,5,7, 4,7,6,
+				2,10,11, 2,11,6,
+				12,3,7, 12,7,13
+			}
+		};
+	}
+	IndexedTriangleList<TexVertex> GetTrianglesTex() const
+	{
+		std::vector<TexVertex> tverts;
+		tverts.reserve( vertices.size() );
+		for( size_t i = 0; i < vertices.size(); i++ )
+		{
+			tverts.emplace_back( vertices[i],tc[i] );
+		}
+		return{
+			std::move( tverts ),{
+				0,2,1, 2,3,1,
+				4,8,5, 5,8,9,
+				2,6,3, 3,6,7,
+				4,5,7, 4,7,6,
+				2,10,11, 2,11,6,
+				12,3,7, 12,7,13
+			}
+		};
+	}
+private:
+	std::vector<Vec3> vertices;
+	std::vector<Vec2> tc;
+};
+```
+
+---
+
+![image](https://user-images.githubusercontent.com/63915665/173087196-b7b42abd-2866-439e-8a7a-025ceeb7b480.png)  
+![image](https://user-images.githubusercontent.com/63915665/173087298-8c4343de-858c-4ac7-a76b-9ea02209200f.png)  
+
+텍스쳐 맵핑을 활용해 스킨을 씌울 수도 있다.  
+```c++
+//CubeSkinned.h
+/* 
+기본적으로 CubeFoldedWrap과 동일하지만 
+const auto ConvertTexCoord = []( float u,float v )
+{
+	return Vec2{ (u + 1.0f) / 3.0f,v / 4.0f }; // 3x4 비율의 스프라이트이므로 u,v를 각각 나눠준다
+};
+함수가 추가되었다.
+이 함수의 목적은 주사위 텍스쳐 크기에 맞게 기존 맵핑 좌표를 조정해주는 것이다.  
+*/
+#pragma once
+
+#pragma once
+
+#include "Vec3.h"
+#include <vector>
+#include "IndexedLineList.h"
+#include "IndexedTriangleList.h"
+#include "TexVertex.h"
+
+class CubeSkinned
+{
+public:
+	CubeSkinned( float size )
+	{
+		const float side = size / 2.0f;
+		const auto ConvertTexCoord = []( float u,float v )
+		{
+			return Vec2{ (u + 1.0f) / 3.0f,v / 4.0f };
+		};
+
+		vertices.emplace_back( -side,-side,-side ); // 0
+		tc.emplace_back( ConvertTexCoord( 1.0f,0.0f ) );
+		vertices.emplace_back( side,-side,-side ); // 1
+		tc.emplace_back( ConvertTexCoord( 0.0f,0.0f ) );
+		vertices.emplace_back( -side,side,-side ); // 2
+		tc.emplace_back( ConvertTexCoord( 1.0f,1.0f ) );
+		vertices.emplace_back( side,side,-side ); // 3
+		tc.emplace_back( ConvertTexCoord( 0.0f,1.0f ) );
+		vertices.emplace_back( -side,-side,side ); // 4
+		tc.emplace_back( ConvertTexCoord( 1.0f,3.0f ) );
+		vertices.emplace_back( side,-side,side ); // 5
+		tc.emplace_back( ConvertTexCoord( 0.0f,3.0f ) );
+		vertices.emplace_back( -side,side,side ); // 6
+		tc.emplace_back( ConvertTexCoord( 1.0f,2.0f ) );
+		vertices.emplace_back( side,side,side ); // 7
+		tc.emplace_back( ConvertTexCoord( 0.0f,2.0f ) );
+		vertices.emplace_back( -side,-side,-side ); // 8
+		tc.emplace_back( ConvertTexCoord( 1.0f,4.0f ) );
+		vertices.emplace_back( side,-side,-side ); // 9
+		tc.emplace_back( ConvertTexCoord( 0.0f,4.0f ) );
+		vertices.emplace_back( -side,-side,-side ); // 10
+		tc.emplace_back( ConvertTexCoord( 2.0f,1.0f ) );
+		vertices.emplace_back( -side,-side,side ); // 11
+		tc.emplace_back( ConvertTexCoord( 2.0f,2.0f ) );
+		vertices.emplace_back( side,-side,-side ); // 12
+		tc.emplace_back( ConvertTexCoord( -1.0f,1.0f ) );
+		vertices.emplace_back( side,-side,side ); // 13
+		tc.emplace_back( ConvertTexCoord( -1.0f,2.0f ) );
+	}
+	IndexedLineList GetLines() const
+	{
+		throw std::runtime_error( "Incomplete function CubeFolded::GetLines!" );
+		//return{
+		//	vertices,{
+		//		0,1,  1,3,  3,2,  2,0,
+		//		0,4,  1,5,	3,7,  2,6,
+		//		4,5,  5,7,	7,6,  6,4 }
+		//};
+	}
+	IndexedTriangleList<Vec3> GetTriangles() const
+	{
+		return{
+			vertices,{
+				0,2,1, 2,3,1,
+				4,8,5, 5,8,9,
+				2,6,3, 3,6,7,
+				4,5,7, 4,7,6,
+				2,10,11, 2,11,6,
+				12,3,7, 12,7,13
+			}
+		};
+	}
+	IndexedTriangleList<TexVertex> GetTrianglesTex() const
+	{
+		std::vector<TexVertex> tverts;
+		tverts.reserve( vertices.size() );
+		for( size_t i = 0; i < vertices.size(); i++ )
+		{
+			tverts.emplace_back( vertices[i],tc[i] );
+		}
+		return{
+			std::move( tverts ),{
+				0,2,1, 2,3,1,
+				4,8,5, 5,8,9,
+				2,6,3, 3,6,7,
+				4,5,7, 4,7,6,
+				2,10,11, 2,11,6,
+				12,3,7, 12,7,13
+			}
+		};
+	}
+private:
+	std::vector<Vec3> vertices;
+	std::vector<Vec2> tc;
+};
+```
+  
+---
+  
+![image](https://user-images.githubusercontent.com/63915665/173088698-e859e4fe-fef0-4f87-96f6-0f535d777ef1.png)  
+![image](https://user-images.githubusercontent.com/63915665/173088737-38dcfa55-ac79-4240-ab59-6a5dce95723c.png)  
+
+현재 우리의 코드에서 텍스쳐를 확대하면 상당히 pixelated된 모습을 볼 수 있는데, 이를 다양한 interpolation 기법들 (e.g. Bilinear filtering)을 사용해 뿌옇게 만들 수 있다. 이는 실제로 코드로 지금 다루지는 않겠지만 참고할 만 하다.
+
+![image](https://user-images.githubusercontent.com/63915665/173088300-a2375d57-b8b1-477a-aa96-6e00724a4c16.png)  
+![image](https://user-images.githubusercontent.com/63915665/173088907-2e5c9182-5a0a-4056-9b79-2d4a810a2e5d.png)  
+![image](https://user-images.githubusercontent.com/63915665/173089008-8728ee08-0ed6-40fe-8dfe-11ff9ebde03c.png)  
+
+또 MIP mapping이라는 기법을 사용해 시각적으로 개선할 수 있는데, 이는 축소된 형태의 텍스쳐를 미리 만들어놓고 멀리 떨어진 텍스쳐의 경우 그 축소된 텍스쳐를 가져다 사용하는 것이다. 이렇게 하는 것으로 멀리 떨어진 텍스쳐를 뿌옇지 않고 깔끔하게 렌더링할 수 있다.  
+(참고: https://en.wikipedia.org/wiki/Anisotropic_filtering)  
+
+![image](https://user-images.githubusercontent.com/63915665/173089192-ae021838-a6dc-4808-83e4-da07618ac69f.png)  
+또 normalmap을 mapping하는 과정도 텍스쳐를 mapping하는 과정과 상당히 유사하다. 같은 수의 폴리곤으로 많은 차이를 만들어낼 수 있으므로 normalmap은 아주 중요한데, 때문에 이번 글에서 다룬 texture mapping 내용 전반은 그래픽스 전반에서 굉장히 중요하다고 할 수 있겠다.  
 
