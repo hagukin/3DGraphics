@@ -201,8 +201,8 @@ public:
 그러기 위해서는 우리는 텍스쳐의 모든 점들에 대해 그 점과 맵핑되어있는 물체의 정점들의 z값들을 알아야 한다.  
 단순히 생각하면 z1과 z2 사이를 linear interpolate하는 걸로 그 사이의 zk 값들을 전부 구할 수 있어보이지만, 이렇게 하면 또 한 번 밀도가 달라지기 때문에 우리는 대신 1/z1, 1/z2를 구한 후 그 사이를 interpolate해주어 1/zk를 구하고, zk가 필요할 때 이때 구한 값을 다시 한번 역수를 취해줌으로써 zk를 구하면 된다.  
 (말로 설명하기 복잡하고, 또 수학적 증명 과정 또한 생략되어 있지만, 직관적으로 이해하고 넘어가자. 수학적 증명과정에 대해서는 이 자료를 참고하자.  
-[자료1](https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/visibility-problem-depth-buffer-depth-interpolation)  
-[자료2](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.3.211&rep=rep1&type=pdf))  
+[자료1](https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/visibility-problem-depth-buffer-depth-interpolation) 
+[자료2](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.3.211&rep=rep1&type=pdf))
 
 ---  
 
@@ -212,7 +212,7 @@ public:
 1. 물체의 정점들의 3D 좌표를 원근을 고려해 변형시킨다.  
 ![image](https://user-images.githubusercontent.com/63915665/178102086-19dbfb05-2840-48e4-9307-4ee9d446e84a.png)  
 **이때 기존에는 3D 좌표(Vec3)만을 받아 이 좌표값에 1/z를 곱해 원근좌표로 변환해주는 것만을 했는데, 이제부터는 정점 오브젝트(Vertex) 자체를 받아와 오브젝트 자체에 1/z를 계산해준다. 코드에서 보이는 v \*= zInv; 부분이다.  
-TextureEffects의 경우 이 과정에서 텍스쳐 좌표들에 1/z를 곱하는 과정이 포함된다. 또 좌표값의 z(=Vertex.pos.z)값에 1/z를 곱하면 1이 되버리므로 쓸모가 없기 때문에 pos.z에는 1/z를 저장해둔다. 물론 vertex 내부에 zInv를 따로 저장해도 되겠지만 메모리를 아끼기 위해 이와 같은 방법을 취한다. (이는 구조적으로 좋은 방ㅂ버이 아니다. 하나의 변수가 여러 역할을 할 뿐더러 변수명과 다른 역할을 하기 때문이다. 이 부분은 차후 수정될 것이다.) **  
+TextureEffects.Vertex의 경우 이 과정에서 텍스쳐 좌표들에 1/z를 곱하는 과정이 포함된다. 또 좌표값의 z(=Vertex.pos.z)값에 1/z를 곱하면 1이 되버리므로 쓸모가 없기 때문에 pos.z에는 1/z를 저장해둔다. 물론 vertex 내부에 zInv를 따로 저장해도 되겠지만 메모리를 아끼기 위해 이와 같은 방법을 취한다. (이는 구조적으로 좋은 방ㅂ버이 아니다. 하나의 변수가 여러 역할을 할 뿐더러 변수명과 다른 역할을 하기 때문이다. 이 부분은 차후 수정될 것이다.) **  
 
 2. 파이프라인에서 어떤 픽셀을 그리기 직전에 셰이더 연산을 한다. 텍스쳐를 입히는 경우에도 이곳에서 연산이 처리된다.  
 ![image](https://user-images.githubusercontent.com/63915665/178102329-415ef1e1-4f08-4c9b-81cf-0fc26bf7f463.png)  
@@ -224,3 +224,9 @@ TextureEffects의 경우 이 과정에서 텍스쳐 좌표들에 1/z를 곱하�
 
 ---  
 ![image](https://user-images.githubusercontent.com/63915665/178100358-4040254f-d22c-4bf5-b8f3-f6db84369db5.png)  
+옛날 게임들(PS1 세대)의 경우 이러한 기법이 사용되지 않은 것을 많이 볼 수 있는데, 가장 큰 원인은 1/z를 구하는 과정에서 floating point를 사용해야 하는데 이게 프레임레이트를 떨어뜨렸기 때문이다. 퀘이크나 둠의 경우 이러한 연산 속도문제를 최대한 줄일 수 있게 방법들을 고안했는데, 벽과 땅을 90도로 고정시켜 z연산을 빠르게 만들거나(둠), 혹은 모든 픽셀이 아닌 몇몇 픽셀에 대해서만 correction을 하는 등(퀘이크) 여러 방법을 사용했다. 자세한 건 [여기](https://en.wikipedia.org/wiki/Texture_mapping#Perspective_correctness)를 참조.  
+  
+---  
+마지막으로 우리가 이렇게 작성한 코드가 실제 하드웨어 GPU 렌더링 파이프라인과 어떻게 다른지 간략히 살펴보자.  
+![image](https://user-images.githubusercontent.com/63915665/178102666-d34479dc-e2f5-4d63-9d31-bba3841c6989.png)  
+우리의 파이프라인에서는 모든 정점들 (Effects 내에 선언된 Vertex 클래스들)에 대해 perspective correction을 해주고 있지만, 실제 하드웨어 연산을 지원하는 그래픽스 라이브러리에서는 각 정점들(Vertex)에 대해 perspective correction을 적용할 지 말지를 결정할 수 있다.  
